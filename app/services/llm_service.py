@@ -1702,6 +1702,8 @@ def load_model(
             _reset_idle_timer()
         return
 
+    if model_id and model_id.startswith("MiniMax-M"):
+        raise ValueError("MiniMax M-series models use the MiniMax provider. Select a local GGUF model in Settings → Services.")
     repo_id = model_id or DEFAULT_HF_REPO
     _provider = "local"
     _remote_url = ""

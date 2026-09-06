@@ -7,8 +7,15 @@ server's existing services configuration and masked in configuration responses.
 For prompt enhancement, select **MiniMax M3 — Subscription / Token Plan** or
 **MiniMax M3 — Pay-as-you-go** as the LLM provider. Maestro uses exactly that
 provider's key; it never falls back to the other key. Provider-side quota and
-credit-overflow rules still apply. Selecting MiniMax clears the separate local
-enhancer selection, so ordinary prompt enhancement uses the chosen M3 provider.
+credit-overflow rules still apply. Switching providers preserves a separately
+configured local enhancer and remembers each provider's model choice. To use
+M3 for ordinary prompt enhancement, leave the separate enhancer set to the
+Director/default LLM option. With a dedicated local enhancer selected, ordinary
+prompt improvement continues to use that local model. Models declaring their
+own dedicated enhancer retain that override.
+
+If switching back to Local previously left `MiniMax-M3` selected, see
+[local prompt improver troubleshooting](LORA_SELECTION.md#local-prompt-improver-troubleshooting).
 
 In **Studio → Video**, choose **MiniMax H3 API** under **Video engine**.
 H3 supports text, first/last frames, and image/video/audio references. H3 Max

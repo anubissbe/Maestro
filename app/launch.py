@@ -522,6 +522,7 @@ def _init_pipeline():
             _active_gen_states,
             terminal_callback=_on_director_pipeline_terminal,
             queue_terminal_callback=_on_director_queue_terminal,
+            list_lora_details=list_loras_details,
         )
         _pipeline_initialized = True
 
@@ -2294,6 +2295,7 @@ def list_loras_details(model_type: str):
                 with open(sidecar, "r", encoding="utf-8") as sf:
                     meta = json.load(sf)
                 info["trained_words"] = meta.get("trainedWords", [])
+                info["description"] = str(meta.get("description") or "")[:2000]
                 info["civitai_model_id"] = meta.get("modelId")
                 info["recommended_weights"] = meta.get("recommendedWeights")
                 # Same date semantics as /api/v1/loras/installed: downloadedAt
@@ -7169,6 +7171,9 @@ async def update_services_config(request: Request):
     services = wgp.server_config.setdefault("services", {})
     updated = {}
 
+    from services.llm_provider_settings import provider_model_update
+    body = provider_model_update(services, body, _DEFAULT_LLM_REPO)
+
     for key, value in body.items():
         if key not in ALLOWED_KEYS:
             continue
@@ -7843,6 +7848,50 @@ def _guard_interactive_llm_against_generation() -> None:
                 "reaches the front."
             ),
         )
+
+
+@api.post("/api/v1/llm/suggest-loras")
+def llm_suggest_loras(body: dict):
+    from services import llm_service
+    from services.lora_suggestions import suggest_loras
+
+    model_type = body.get("model_type")
+    prompt = body.get("prompt", "")
+    paths = body.get("image_paths", [])
+    if not isinstance(model_type, str) or not model_type:
+        raise HTTPException(status_code=400, detail="model_type is required")
+    if not isinstance(prompt, str) or len(prompt) > 16000:
+        raise HTTPException(status_code=400, detail="Invalid prompt (maximum 16000 characters)")
+    if not isinstance(paths, list) or len(paths) > 8 or any(not isinstance(p, str) for p in paths):
+        raise HTTPException(status_code=400, detail="Provide at most eight image paths")
+    if any(not os.path.isfile(p) for p in paths):
+        raise HTTPException(status_code=400, detail="A reference image is no longer available")
+    if not prompt.strip() and not paths:
+        raise HTTPException(status_code=400, detail="Add a prompt or reference image first")
+    services = wgp.server_config.get("services", {})
+    include_nsfw = bool(services.get("nsfw_mode")) and body.get("include_nsfw") is True
+    active_names = body.get("active_loras", [])
+    if not isinstance(active_names, list) or any(not isinstance(n, str) for n in active_names):
+        raise HTTPException(status_code=400, detail="Invalid active LoRA list")
+    details = list_loras_details(model_type)["loras"]
+    active = [row for row in details if row["filename"] in active_names]
+    if set(active_names) - {row["filename"] for row in active}:
+        raise HTTPException(status_code=400, detail="Remove unavailable active LoRAs before requesting suggestions")
+    candidates = [row for row in details
+                  if (include_nsfw or not row.get("nsfw"))
+                  and row["filename"] not in active_names
+                  and os.path.isfile(wgp.resolve_lora_path(model_type, row["filename"]))]
+    if not candidates:
+        return {"suggestions": [], "image_used": False}
+    _guard_interactive_llm_against_generation()
+    _ensure_llm_loaded()
+    if paths and not llm_service._vision_available:
+        raise HTTPException(status_code=400, detail="Choose a vision-capable LLM in Settings to use reference images")
+    try:
+        suggestions = suggest_loras(candidates, prompt, model_type, paths, llm_service.generate, active)
+        return {"suggestions": suggestions, "image_used": bool(paths)}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"LoRA suggestions failed: {exc}") from exc
 
 
 @api.post("/api/v1/llm/generate")

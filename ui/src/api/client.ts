@@ -1219,6 +1219,28 @@ export async function deletePreset(id: string): Promise<void> {
 
 // --- LoRAs ---
 
+export interface LoraSuggestion {
+  filename: string
+  reason: string
+  trained_words: string[]
+  conflicts: string[]
+  warnings?: string[]
+  assessment_complete?: boolean
+}
+
+export async function suggestLoras(body: {
+  model_type: string; prompt: string; image_paths: string[]; active_loras: string[]; include_nsfw: boolean
+}): Promise<{ suggestions: LoraSuggestion[]; image_used: boolean }> {
+  const res = await fetch(`${BASE}/api/v1/llm/suggest-loras`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}))
+    throw new Error(error.detail || 'Could not suggest LoRAs')
+  }
+  return res.json()
+}
+
 export async function fetchLoras(modelType: string): Promise<{ loras: string[]; guidance_max_phases: number }> {
   const res = await fetch(`${BASE}/api/v1/loras/${encodeURIComponent(modelType)}`)
   if (!res.ok) throw new Error('Failed to fetch loras')

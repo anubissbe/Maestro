@@ -59,6 +59,7 @@ from models.minimax_h3.reference_manifest import (
 
 # These will be set by launch.py on startup
 _jobs: dict = None          # reference to launch._jobs
+_list_lora_details = None   # model-filtered local catalog from launch
 _run_generation = None      # reference to launch._run_generation
 _wgp = None                 # reference to wgp module
 _gen_lock = None            # reference to launch._gen_lock
@@ -1294,6 +1295,7 @@ def _save_pipeline_state_locked(pid: str) -> bool:
         "phase": p.get("phase"),
         "progress": copy.deepcopy(p.get("progress") or {}),
         "error": p.get("error"),
+        "lora_warnings": p.get("lora_warnings", []),
         "workspace": p.get("workspace") or "default",
         "pipeline_type": params.get("pipeline_type", "music_video"),
         "scene_description": params.get("scene_description", ""),
@@ -4411,10 +4413,13 @@ def init(
     active_gen_states=None,
     terminal_callback=None,
     queue_terminal_callback=None,
+    list_lora_details=None,
 ):
     """Called by launch.py to wire up shared references."""
     global _jobs, _run_generation, _wgp, _gen_lock, _active_gen_states
     global _terminal_callback, _queue_terminal_callback
+    global _list_lora_details
+    _list_lora_details = list_lora_details
     _jobs = jobs_dict
     _run_generation = run_gen_fn
     _wgp = wgp_module
@@ -4962,6 +4967,7 @@ def get_pipeline_status(pid: str, out_dir: str) -> Optional[dict]:
         "phase": saved.get("phase") or response_status,
         "auto_mode": bool(saved.get("auto_mode", True)),
         "progress": restored_progress,
+        "lora_warnings": saved.get("lora_warnings", []),
         "clip_plans": [{
             "image_prompt": clip.get("image_prompt", ""),
             "video_prompt": clip.get("video_prompt", ""),
@@ -5534,6 +5540,9 @@ def _run_pipeline(pid: str, resume: bool = False):
         # Bounded shots have no semantic memory of the preceding generation.
         # Re-attach the stored world/location anchor after any LLM polish so a
         # rewrite cannot reduce a recognizable set to a generic room.
+        if not reused_plan and params.get("_auto_lora_selections"):
+            from services.director_auto_loras import apply_keywords
+            clip_plans = apply_keywords(clip_plans, params["_auto_lora_selections"])
         clip_plans = apply_independent_shot_context(clip_plans)
         _preflight_h3_director_prompts(
             params.get("video_model", ""),
@@ -5968,6 +5977,55 @@ def _capture_llm_pass(pid: str, pass_name: str):
         pass
 
 
+def _select_automatic_loras(pid: str, params: dict):
+    if params.get("auto_select_loras") is not True or params.get("_auto_loras_checked"):
+        return
+    from services import llm_service
+    from services.director_auto_loras import select_addition
+
+    if _list_lora_details is None:
+        raise RuntimeError("Director's LoRA catalog is unavailable")
+    image_inputs = _director_planner_image_inputs(params)
+    paths = list(dict.fromkeys(p for p in [image_inputs.get("reference_image_path"),
+        *image_inputs.get("character_ref_paths", []), *image_inputs.get("location_ref_paths", [])] if p))
+    if paths and not llm_service._vision_available:
+        raise RuntimeError("Automatic LoRA selection from images requires a vision-capable LLM")
+    if any(not os.path.isfile(path) for path in paths):
+        raise RuntimeError("A Director reference image is missing; upload it again before planning")
+    nsfw = bool((_wgp.server_config.get("services") or {}).get("nsfw_mode"))
+    choices = params.setdefault("_auto_lora_selections", {})
+    for mode in ("image", "video"):
+        if mode in choices:
+            continue
+        if mode == "image" and not shot_images_required(_director_effective_shot_image_policy(params)):
+            continue
+        if mode == "video" and params.get("video_engine") == "minimax":
+            continue
+        model = params.get(mode + "_model")
+        if not model or (_wgp.get_model_def(model) or {}).get("loras_disabled"):
+            continue
+        _update_pipeline(pid, progress={"current": 0, "total": 1,
+            "message": f"Selecting compatible downloaded {mode} LoRAs...", "step": 0, "total_steps": 0})
+        details = _list_lora_details(model)
+        selected = params.get(mode + "_loras") or {}
+        names = selected.get("activated_loras") or []
+        catalog = [row for row in details["loras"]
+                   if (nsfw or not row.get("nsfw") or row["filename"] in names)
+                   and (row["filename"] in names
+                        or os.path.isfile(_wgp.resolve_lora_path(model, row["filename"])))]
+        updated, choice = select_addition(catalog, selected, params.get("scene_description", ""),
+            model, paths, llm_service.generate, details.get("guidance_max_phases", 1))
+        params[mode + "_loras"] = updated
+        choices[mode] = choice
+        existing = _pipelines.get(pid, {}).get("lora_warnings", []) or []
+        report = (f"Automatic LoRA selection ({mode}): added {choice['filename']}. {choice['reason']}"
+                  if choice else f"Automatic LoRA selection ({mode}): no suitable additional LoRA found.")
+        _update_pipeline(pid, lora_warnings=[*existing, report])
+        _save_pipeline_state(pid)
+    params["_auto_loras_checked"] = True
+    _save_pipeline_state(pid)
+
+
 def _run_planning(pid: str, params: dict, pipeline_type: str):
     """Run LLM planning and return (clip_plans, planned_clips).
 
@@ -5975,6 +6033,7 @@ def _run_planning(pid: str, params: dict, pipeline_type: str):
     otherwise falls back to legacy llm_service calls.
     """
     _ensure_llm_loaded(params)
+    _select_automatic_loras(pid, params)
 
     # Default v2 — see launch.py services-config comment for rationale.
     # The params dict is built from servicesConfig in the frontend, so

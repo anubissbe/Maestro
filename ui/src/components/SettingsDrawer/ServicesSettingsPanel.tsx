@@ -267,7 +267,9 @@ export function ServicesSettingsPanel() {
   const [refreshing, setRefreshing] = useState(false)
   const [modelDraft, setModelDraft] = useState('')
   useEffect(() => {
-    setModelDraft(servicesConfig?.llm_model_id || '')
+    let cancelled = false
+    queueMicrotask(() => { if (!cancelled) setModelDraft(servicesConfig?.llm_model_id || '') })
+    return () => { cancelled = true }
   }, [servicesConfig?.llm_model_id])
   useEffect(() => {
     if (servicesConfig?.llm_provider) void loadLlmModels()
@@ -333,10 +335,8 @@ export function ServicesSettingsPanel() {
             onChange={e => {
               const newProvider = e.target.value
               const updates: Record<string, unknown> = { llm_provider: newProvider }
-              if (newProvider === 'minimax' || newProvider === 'minimax_subscription') {
-                updates.llm_model_id = 'MiniMax-M3'
-                updates.enhance_llm_model_id = ''
-              }
+              // The server restores the model saved for this provider. Keep
+              // a dedicated local enhancer intact when switching providers.
               // Auto-disable NSFW when switching to a public provider
               if (PUBLIC_PROVIDERS.has(newProvider) && servicesConfig.nsfw_mode) {
                 updates.nsfw_mode = false

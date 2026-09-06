@@ -13,6 +13,7 @@ The flagship feature. Drop in an audio track or write a story; a local LLM plans
 - **Short Film** — screenplay-driven scenes with named characters, dialogue, and continuity across cuts. Pacing-bias slider controls cut frequency.
   
 - **Auto Mode** runs the entire pipeline end-to-end (analyze → plan → generate images → generate clips → combine). Manual mode lets you review and edit at every step.
+- **Automatic LoRA selection** can add one compatible downloaded LoRA per image/video model during new pipeline planning, check it against your selection, and include its trigger words. Enabled for new projects; uncertain choices are skipped. [Usage and limits](docs/LORA_SELECTION.md#automatic-director-selection).
 - **Director v2 architecture** with structured shot planning, mode-specific prompt renderers, and a 3-pass refinement (screenplay → shot breakdown → per-model polish). Director v2 optimizes what the LLM is being asked to do across several passes, with each pass optimizing the LLM request for creativity (when writing the screenplay), structured outputs (when outputting JSON), and prompt refinement, which injects LoRA prompting guides into the context.  
 
 ### ⚡ Performance Auto-Tune — zero-config setup
@@ -39,9 +40,12 @@ Maestro auto-downloads `llama-server` (~600 MB one-time) and your chosen GGUF mo
 - Pre-curated registry: Gemma 4 (2B / 4B / 26B MoE / 31B), Qwen3.6 27B, and **Qwen3.8 27B Uncensored** with model-aware deep thinking for creative writing and prompt enhancement
 - **External providers** also supported: OpenAI, Anthropic, custom OpenAI-compatible endpoints (currently experimental)
 - **Vision support** so LLMs can enhance prompting based on reference images
+- **Provider-specific model choices** are remembered when switching providers; a separately selected local prompt enhancer is preserved. [Troubleshooting local enhancement](docs/LORA_SELECTION.md#local-prompt-improver-troubleshooting).
 - Auto-unloads after 60s idle to free VRAM for video gen
 
 ### 🛒 Built-in CivitAI LoRA browser
+
+- **Prompt + image LoRA suggestions** in Studio and Director use your downloaded model-compatible library. **Add LoRA + keywords** activates a suggestion and inserts missing metadata trigger words. AI interaction advice does not block manual addition. Studio's **Generate** button does not automatically select LoRAs or add keywords for manually checked LoRAs. [Full guide](docs/LORA_SELECTION.md).
 - Search, filter, and one-click install any LoRA from CivitAI without leaving Maestro
 - **LoRA update detection** — Check button refreshes from CivitAI, shows update badges on outdated LoRAs
 - **My LoRAs view** with filters for Updates and direct uninstall
@@ -82,6 +86,15 @@ View all past Director runs with their full state — clip plans, generated imag
 ## Updates
 
 The version you are running is shown next to the Maestro title in the UI. To update, use the launcher's Update button in Pinokio.
+
+### Unreleased
+
+- Added downloaded-LoRA suggestions to Studio Images/Video and Director Image/Video selectors, with one-click activation and missing-keyword insertion.
+- Added optional automatic Director LoRA selection during new pipeline planning, with saved choices, recommended weights, and separate image/video trigger handling.
+- Changed speculative LoRA conflict messages to non-blocking AI advice for manual selection; automatic selection remains conservative.
+- Fixed local prompt improvement after switching back from MiniMax by retaining a model choice per provider and preserving dedicated local enhancer settings.
+
+See the [changelog](CHANGELOG.md#unreleased), [LoRA guide](docs/LORA_SELECTION.md), and [dated development log](docs/DEVELOPMENT_LOG.md). These changes are not yet assigned a release version.
 
 ### v2.0.1 (2026-09-04)
 

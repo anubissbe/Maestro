@@ -54,6 +54,13 @@ got `git add`-ed).
 
 ## Conventions
 
+- **Document user-visible changes in the same change.** Add an entry under
+  [Unreleased](CHANGELOG.md#unreleased), update the relevant README feature or
+  workflow, and maintain its guide in `docs/`. Record dated implementation,
+  validation, and known limits in [the development log](docs/DEVELOPMENT_LOG.md).
+  Distinguish automated tests from live runs, and leave release versions and
+  release dates unchanged until a release is prepared. Do not include credentials,
+  private prompts, or machine-specific configuration files in documentation.
 - **Match the surrounding code.** Follow the naming, structure, and comment
   style already in the file you're editing.
 - **Keep the app local-first.** No telemetry, no phone-home, no required
