@@ -16,7 +16,6 @@ import time
 from urllib.parse import urlparse, urljoin
 
 import requests
-from fastapi import APIRouter, HTTPException
 
 API_ROOT = "https://api.minimax.io"
 TERMINAL = {"completed", "failed", "cancelled", "unknown", "paused"}
@@ -328,6 +327,10 @@ class MiniMaxJobs:
 
 
 def create_router(manager):
+    # Only HTTP route registration needs FastAPI. Keep the validation and
+    # job helpers importable in the dependency-light CPU test environment.
+    from fastapi import APIRouter, HTTPException
+
     router = APIRouter(prefix="/api/v1/minimax")
 
     @router.get("/jobs")

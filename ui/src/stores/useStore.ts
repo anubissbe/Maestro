@@ -1936,6 +1936,7 @@ interface AppState {
   directorSpeakers: string[]
   directorSpeakerMappings: SpeakerMapping[]
   directorAutoMode: boolean
+  directorAutoSelectLoras: boolean
   directorSeamless: boolean
   directorShotImageGuidance: DirectorShotImageGuidance
   /** Completed LLM stream outputs, kept so the thinking/output boxes stay
@@ -1962,6 +1963,7 @@ interface AppState {
   directorH3FirstBlockCacheMultiplierByModel: Record<string, number>
   directorH3FirstBlockCacheWarmupByModel: Record<string, number>
   setDirectorAutoMode: (v: boolean) => void
+  setDirectorAutoSelectLoras: (v: boolean) => void
   setDirectorSeamless: (v: boolean) => void
   setDirectorShotImageGuidance: (v: DirectorShotImageGuidance) => void
   setDirectorSkill: (skill: DirectorSkill) => void
@@ -2332,6 +2334,7 @@ async function _buildDirectorRestorePatch(
     directorSpeakers: _stringArray(ui.directorSpeakers),
     directorSpeakerMappings: Array.isArray(ui.directorSpeakerMappings)
       ? ui.directorSpeakerMappings as SpeakerMapping[] : [],
+    directorAutoSelectLoras: Boolean(ui.directorAutoSelectLoras ?? params.auto_select_loras),
     directorAutoMode: ui.directorAutoMode == null ? pipeline.auto_mode : Boolean(ui.directorAutoMode),
     directorSeamless: ui.directorSeamless == null ? pipeline.seamless : Boolean(ui.directorSeamless),
     directorShotImageGuidance: (ui.directorShotImageGuidance || pipeline.shot_image_guidance || 'auto') as DirectorShotImageGuidance,
@@ -9579,6 +9582,7 @@ export const useStore = create<AppState>((set, get) => ({
   // the common flow), Seamless OFF (separate per-clip generations are easier
   // to retake/review than one rolling-window render).
   directorAutoMode: true,
+  directorAutoSelectLoras: true,
   directorSeamless: false,
   directorShotImageGuidance: 'auto' as DirectorShotImageGuidance,
   directorLlmLog: [],
@@ -9626,6 +9630,7 @@ export const useStore = create<AppState>((set, get) => ({
   directorSourcePipelineId: null,
   directorProjectId: null,
   setDirectorAutoMode: (v) => set({ directorAutoMode: v }),
+  setDirectorAutoSelectLoras: (v) => set({ directorAutoSelectLoras: v }),
   setDirectorSeamless: (v) => set({ directorSeamless: v }),
   setDirectorShotImageGuidance: (v) => set({
     directorShotImageGuidance: v,
@@ -10684,6 +10689,7 @@ export const useStore = create<AppState>((set, get) => ({
       directorSpeakers: [],
       directorSpeakerMappings: [],
       directorAutoMode: true,
+      directorAutoSelectLoras: true,
       directorSeamless: false,
       directorShotImageGuidance: 'auto' as DirectorShotImageGuidance,
       directorLlmLog: [],
@@ -13279,6 +13285,7 @@ export const useStore = create<AppState>((set, get) => ({
         ...matchingImageParams,
         resolution: directorImageResolution,
       },
+      auto_select_loras: state.directorAutoSelectLoras,
       image_loras: savedLoraPerMode.image || {},
       image_spatial_upsampling: directorImageSpatialUpsampling,
       image_film_grain_intensity: directorImageFilmGrainIntensity,
@@ -13347,6 +13354,7 @@ export const useStore = create<AppState>((set, get) => ({
         directorSpeakers: state.directorSpeakers,
         directorSpeakerMappings: state.directorSpeakerMappings,
         directorAutoMode: state.directorAutoMode,
+        directorAutoSelectLoras: state.directorAutoSelectLoras,
         directorSeamless: state.directorSeamless,
         directorShotImageGuidance: state.directorShotImageGuidance,
         directorLlmLog: state.directorLlmLog,

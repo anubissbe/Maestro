@@ -5,6 +5,7 @@ import { Search, X, Loader2, Globe, Sparkles, BookOpen, Info, ArrowUpCircle, Ref
 import { useStore } from '../../stores/useStore'
 import { generateLoraGuide, fetchLoraGuide, fetchLoraDetails, checkLoraUpdates } from '../../api/client'
 import { formatAge } from '../../lib/format'
+import { LoraSuggestions } from './LoraSuggestions'
 import type { LoraRecommendedWeights, LoraUpdateStatus } from '../../types'
 
 export function LoraGuideTooltip({ guide }: { guide: string }) {
@@ -401,6 +402,7 @@ export function LoraSelector() {
       {compatibilityNotice}
 
       {/* Search + NSFW + Updatable toggles */}
+      <LoraSuggestions includeNsfw={nsfwEnabled && showNsfw} />
       <div className="flex items-center gap-2 mb-2">
         <div className="relative flex-1">
           <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />

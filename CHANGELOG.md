@@ -5,6 +5,42 @@ pipeline's own history lives in [app/docs/CHANGELOG.md](app/docs/CHANGELOG.md).
 
 ## [Unreleased]
 
+### Added
+
+- Added prompt- and reference-image-based suggestions from downloaded LoRAs in
+  Studio (including Images) and Director's Image/Video LoRA selectors. Suggestions
+  use the selected model's existing compatibility catalog and local metadata;
+  missing files and invented LLM filenames cannot become recommendations.
+- Added **Add LoRA + keywords**: activate one suggestion and append missing
+  `trainedWords` from its metadata, preserving trigger spelling. Suggestions
+  expire when the prompt, references, model, or active selection changes, so a
+  subsequent addition is assessed against the updated combination.
+- Added **Automatically select compatible downloaded LoRAs** to Director, enabled
+  for new projects. New pipeline planning may add at most one LoRA per image/video
+  model, preserve existing weight schedules, use recommended weights for the
+  addition, and include its keywords in that model's render prompts. Choices and
+  reasons are saved with the run; resumed or prepared plans retain their selection.
+
+### Fixed
+
+- MiniMax validation and job helpers no longer require FastAPI merely to import;
+  route registration loads it when needed, keeping the CPU test suite portable.
+- LoRA suggestion reference paths are restricted to valid images in Maestro's
+  uploads or configured outputs root, including checks for symlinks escaping those
+  directories, before being sent to a vision LLM.
+- LLM interaction warnings and insufficient metadata no longer appear as blocking
+  "Possible conflict" errors in manual LoRA suggestions. They are advisory; the
+  same-file exclusion and shared-LoRA-ID duplicate-version check remain. Automatic
+  Director selection still skips warnings and incomplete assessments.
+- Switching LLM providers now remembers each provider's model choice and preserves
+  a separately configured local prompt enhancer. Returning from MiniMax to Local
+  no longer leaves `MiniMax-M3` selected as a fictitious local GGUF repository;
+  saving affected settings repairs that selection, and the local loader reports
+  an explicit provider/model mismatch instead of attempting the download.
+
+Usage and current limits: [LoRA suggestions and automatic selection](docs/LORA_SELECTION.md).
+Implementation and validation record: [development log](docs/DEVELOPMENT_LOG.md).
+
 ## [2.0.1] - 2026-09-04
 
 Startup and duration planning: fixed the post-v2.0 black-screen regression

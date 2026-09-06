@@ -2836,6 +2836,9 @@ function DirectorModelSelection({ disabled = false }: { disabled?: boolean }) {
 }
 
 function DirectorLoraAccordion() {
+  const autoSelectLoras = useStore(s => s.directorAutoSelectLoras)
+  const setAutoSelectLoras = useStore(s => s.setDirectorAutoSelectLoras)
+  const loraReports = useStore(s => s.pipelineStatus?.lora_warnings)
   // Resolve Director's per-shoot image and video models from saved
   // per-mode selections, falling back to the same Director defaults
   // the pipeline submission uses (useStore.ts:5574). The previous
@@ -2880,7 +2883,22 @@ function DirectorLoraAccordion() {
 
   return (
     <div className="space-y-1">
+      <label className="flex items-start gap-2 rounded-lg border border-border p-2 text-[11px] text-text-secondary">
+        <input type="checkbox" checked={autoSelectLoras}
+          onChange={e => setAutoSelectLoras(e.target.checked)} className="mt-0.5" />
+        <span>Automatically select compatible downloaded LoRAs
+          <span className="mt-1 block text-[10px] text-text-muted">
+            During new prompt planning, add up to one matching LoRA per image/video model.
+            Check against your selection and include its keywords. Uncertain combinations are skipped.
+          </span>
+        </span>
+      </label>
       {/* Image LoRAs */}
+      {loraReports?.filter(message => message.startsWith('Automatic LoRA selection')).map(message => (
+        <p key={message} className="rounded-lg border border-border p-2 text-[10px] text-text-secondary">
+          {message}
+        </p>
+      ))}
       {generateShotImages && imageModel && (
         <div className="border border-border rounded-lg overflow-hidden">
           <button

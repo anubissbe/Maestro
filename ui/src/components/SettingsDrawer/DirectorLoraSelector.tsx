@@ -6,6 +6,7 @@ import { generateLoraGuide, fetchLoraGuide, fetchLoraDetails } from '../../api/c
 import { LoraGuideTooltip, LoraAgeChip, LoraSortToggle, sortLoraNames } from './LoraSelector'
 import type { LoraDates } from './LoraSelector'
 import type { LoraRecommendedWeights } from '../../types'
+import { LoraSuggestions } from './LoraSuggestions'
 
 function serializeDirectorLoraMultipliers(
   loras: string[],
@@ -73,6 +74,7 @@ export function DirectorLoraSelector({ mode, modelType }: {
   const savedLora = useStore(s => s.savedLoraPerMode[mode])
   const directorSetLora = useStore(s => s.directorSetLora)
   const openBrowser = useStore(s => s.setLoraBrowserOpen)
+  const includeNsfw = useStore(s => !!s.servicesConfig?.nsfw_mode)
 
   const [availableLoras, setAvailableLoras] = useState<string[]>(savedLora?.availableLoras || [])
   const [activatedLoras, setActivatedLoras] = useState<string[]>(savedLora?.activated_loras || [])
@@ -306,6 +308,9 @@ export function DirectorLoraSelector({ mode, modelType }: {
       </div>
 
       {/* Search */}
+      <LoraSuggestions includeNsfw={includeNsfw} director={{
+        mode, modelType, active: activatedLoras, available: availableLoras, onAdd: toggleLora,
+      }} />
       <div className="relative mb-2">
         <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
         <input
