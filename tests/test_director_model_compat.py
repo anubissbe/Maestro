@@ -1992,13 +1992,19 @@ class TestDirectorH3GenerationContract(unittest.TestCase):
                     "location_ref_paths": [location],
                     "_director_shot_image_policy": SHOT_IMAGES_DIRECT_REFERENCES,
                 },
-                [{"video_prompt": "The character enters the location."}],
-                [{"duration_frames": 124}],
-                [""],
+                [
+                    {"video_prompt": "The character enters the location.", "_director_continuity_group": "kitchen"},
+                    {"video_prompt": "A closer angle as the character sits down.", "_director_continuity_group": "kitchen"},
+                    {"video_prompt": "The character arrives outside at night.", "_director_continuity_group": "street_night"},
+                ],
+                [{"duration_frames": 124}] * 3,
+                ["", "", ""],
                 out_dir=self.temp_dir.name,
             )
 
         self.assertNotIn("image_start", captured)
+        self.assertEqual(captured["per_clip_omni_continuity"], [False, True, False])
+        self.assertTrue(captured["_omni_sequence_continuity"])
         manifest = captured["per_clip_minimax_h3_references"][0]
         self.assertEqual(
             [item.get("image_intent") for item in manifest if item["type"] == "image"],

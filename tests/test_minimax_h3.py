@@ -1739,6 +1739,7 @@ class TestMiniMaxH3Definition(unittest.TestCase):
                 self.detail = detail
 
         guard.__globals__.update({
+            "wgp": types.SimpleNamespace(server_config={"services": {"llm_provider": "local"}}),
             "_gen_lock": types.SimpleNamespace(locked=lambda: False),
             "_jobs": {"busy": {"status": "running"}},
             "snapshot_job": lambda job: dict(job),
@@ -1748,6 +1749,10 @@ class TestMiniMaxH3Definition(unittest.TestCase):
             guard()
         self.assertEqual(raised.exception.status_code, 409)
         self.assertIn("AI prompt planning has not started", raised.exception.detail)
+
+        guard.__globals__["wgp"].server_config["services"]["llm_provider"] = "minimax_subscription"
+        guard()  # Cloud prompt improvement does not need the occupied GPU.
+        guard.__globals__["wgp"].server_config["services"]["llm_provider"] = "local"
 
         guard.__globals__["_jobs"] = {"held": {"status": "held"}}
         guard()

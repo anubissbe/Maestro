@@ -426,6 +426,8 @@ function LlmLogStage({ stage, label }: { stage: string; label: string }) {
 }
 
 export function DirectorChat() {
+  const videoEngine = useStore(s => s.servicesConfig?.director_video_engine || 'local')
+  const updateServices = useStore(s => s.updateServicesConfig)
   const step = useStore(s => s.directorStep)
   const loading = useStore(s => s.directorLoading)
   // Sub-status text ("Loading transcription model (first use downloads
@@ -722,6 +724,21 @@ export function DirectorChat() {
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
+      <div className="px-4 pt-3 space-y-1">
+        <label className="text-xs text-text-muted">Video engine
+          <select aria-label="Video engine" disabled={loading || pipelineActive} value={videoEngine} onChange={e => {
+            const engine = e.target.value === 'minimax' ? 'minimax' : 'local'
+            void updateServices({ director_video_engine: engine })
+            if (engine === 'minimax') {
+              useStore.setState(s => ({ selectedModelPerMode: { ...s.selectedModelPerMode, video: 'minimax_h3_ref2va' } }))
+            }
+          }} className="w-full mt-1 rounded-lg bg-bg-tertiary border border-border p-2 text-sm text-text-primary">
+            <option value="local">Local generation</option>
+            <option value="minimax">MiniMax H3 API — Pay-as-you-go</option>
+          </select>
+        </label>
+        {videoEngine === 'minimax' && <p className="text-xs text-text-muted">Video shots use MiniMax H3 (768P), billed to your PAYG key. Director keeps its planning, references and review steps. API shots are at most 15 seconds; video LoRAs are unavailable.</p>}
+      </div>
       {/* Message list */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
         {/* Header with Start Over */}

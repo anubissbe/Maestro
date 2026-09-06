@@ -1064,6 +1064,12 @@ export interface MultiClip {
 export type SettingsTab = 'performance' | 'integrations' | 'notifications'
 
 export interface ServicesConfig {
+  minimax_api_key: string
+  director_video_engine?: 'local' | 'minimax'
+  studio_video_engine?: 'local' | 'minimax'
+  minimax_api_key_set: boolean
+  minimax_subscription_api_key: string
+  minimax_subscription_api_key_set: boolean
   llm_model_id: string
   llm_device: string
   llm_provider: string
