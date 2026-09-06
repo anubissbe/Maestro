@@ -50,6 +50,8 @@ export function Sidebar() {
   const openLoraBrowser = useStore(s => s.setLoraBrowserOpen)
   const isMobile = useIsMobile()
 
+  const videoEngine = useStore(s => s.servicesConfig?.studio_video_engine || 'local')
+  const updateServices = useStore(s => s.updateServicesConfig)
   const isVideo = generationMode === 'video'
   const isImage = generationMode === 'image'
   const isAudio = generationMode === 'audio'
@@ -142,6 +144,18 @@ export function Sidebar() {
           crush sections into each other. */}
       <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-4 min-h-0 [&>*]:shrink-0">
         <GenerationModeSelector />
+        {isVideo && <label className="text-xs text-text-muted">Video engine
+          <select aria-label="Video engine" value={videoEngine} onChange={e => {
+            const engine = e.target.value === 'minimax' ? 'minimax' : 'local'
+            void updateServices({ studio_video_engine: engine })
+            if (engine === 'minimax' && !selectedModel?.architecture?.startsWith('minimax_h3')) {
+              useStore.getState().selectModel('minimax_h3')
+            }
+          }} className="w-full mt-1 rounded-lg bg-bg-tertiary border border-border p-2 text-sm text-text-primary">
+            <option value="local">Local generation</option><option value="minimax">MiniMax H3 API</option>
+          </select>
+        </label>}
+
 
         {/* Studio's user-facing hierarchy is media first, workflow second.
             The workflow selectors route into the legacy video/avatar/tools

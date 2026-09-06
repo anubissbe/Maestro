@@ -7002,7 +7002,7 @@ def _mask_key(key: str) -> str:
     return key[:4] + "..." + key[-4:]
 
 
-_PUBLIC_LLM_PROVIDERS = {"openai", "anthropic"}
+_PUBLIC_LLM_PROVIDERS = {"openai", "anthropic", "minimax", "minimax_subscription"}
 
 
 def _llm_api_key_for_provider(services: dict, provider: str) -> str:
@@ -7017,6 +7017,8 @@ def _llm_api_key_for_provider(services: dict, provider: str) -> str:
         "remote": "llm_remote_api_key",
         "openai": "openai_api_key",
         "anthropic": "anthropic_api_key",
+        "minimax": "minimax_api_key",
+        "minimax_subscription": "minimax_subscription_api_key",
     }.get(str(provider or "").lower())
     return str(services.get(key_name, "") or "") if key_name else ""
 
@@ -7057,6 +7059,10 @@ def get_services_config():
     return {
         "llm_model_id": services.get("llm_model_id", _DEFAULT_LLM_REPO),
         "llm_device": services.get("llm_device", _llm_default_device()),
+        "minimax_api_key": _mask_key(services.get("minimax_api_key", "")),
+        "minimax_api_key_set": bool(services.get("minimax_api_key", "")),
+        "minimax_subscription_api_key": _mask_key(services.get("minimax_subscription_api_key", "")),
+        "minimax_subscription_api_key_set": bool(services.get("minimax_subscription_api_key", "")),
         "llm_provider": provider,
         "llm_remote_url": services.get("llm_remote_url", ""),
         "llm_remote_api_key": _mask_key(services.get("llm_remote_api_key", "")),
@@ -7085,6 +7091,8 @@ def get_services_config():
         # video prompts bypass creative rewriting and keep deterministic
         # continuity/dialogue preflight.
         "director_prompt_polish": services.get("director_prompt_polish", "third_pass"),
+        "director_video_engine": services.get("director_video_engine", "local"),
+        "studio_video_engine": services.get("studio_video_engine", "local"),
         "civitai_api_key": _mask_key(services.get("civitai_api_key", "")),
         "civitai_api_key_set": bool(services.get("civitai_api_key", "")),
         # Optional LTX ID-LoRA conditioning. The control lives in Studio
@@ -7148,6 +7156,9 @@ async def update_services_config(request: Request):
         "llm_model_id", "llm_device", "llm_provider", "llm_remote_url",
         "enhance_llm_model_id", "enhance_llm_device",
         "google_api_key", "llm_remote_api_key", "openai_api_key", "anthropic_api_key",
+        "minimax_api_key", "minimax_subscription_api_key",
+        "director_video_engine",
+        "studio_video_engine",
         "use_director_v2", "nsfw_mode", "nsfw_accepted_at", "director_prompt_polish",
         "civitai_api_key", "voice_reference_enabled", "ltx_progressive_pipeline",
         "show_experimental", "auto_performance", "storage_allow_linked_removal",
@@ -7193,6 +7204,19 @@ async def update_services_config(request: Request):
 # ============================================================================
 # API Routes: Workspaces
 # ============================================================================
+
+# MiniMax cloud tasks use their own persisted queue; no local diffusion model
+# or GPU slot is loaded for these requests.
+from services.minimax_api import MiniMaxJobs, create_router as _minimax_router
+_minimax_jobs = MiniMaxJobs(
+    lambda: wgp.server_config.get("services", {}),
+    _workspace_dir,
+    lambda: os.path.join(os.getcwd(), "uploads"),
+    os.path.join(_APP_DIR, "settings", "minimax_api_jobs.json"),
+)
+api.include_router(_minimax_router(_minimax_jobs))
+api.add_event_handler("startup", _minimax_jobs.resume_all)
+
 
 @api.get("/api/v1/workspaces")
 def list_workspaces_endpoint():
@@ -7786,6 +7810,9 @@ def _ensure_llm_loaded():
         services,
     )
 
+    if desired_provider in ("minimax", "minimax_subscription"):
+        llm_service.load_model(model_id=desired, provider=desired_provider, api_key=desired_api_key)
+        return
     if llm_service.is_loaded():
         status = llm_service.get_status()
         if status.get("model_id") != desired or status.get("provider") != desired_provider:
@@ -7797,6 +7824,10 @@ def _ensure_llm_loaded():
 
 def _guard_interactive_llm_against_generation() -> None:
     """Reject an interactive planner that would compete with generation."""
+
+    services = wgp.server_config.get("services", {})
+    if services.get("llm_provider") in {"minimax", "minimax_subscription"} and not services.get("enhance_llm_model_id"):
+        return
 
     generation_busy = _gen_lock.locked() or any(
         snapshot_job(job).get("status") in {"queued", "running"}
@@ -10065,6 +10096,15 @@ def _enqueue_deferred_generation_preparation(body: dict) -> dict:
 async def generate(request: Request):
     """Submit a generation job. Returns immediately with a job_id."""
     body = await request.json()
+    if body.get("video_engine") == "minimax":
+        from services.minimax_studio import studio_request
+        from services.minimax_api import payg_key
+        try:
+            payg_key(wgp.server_config.get("services", {}))
+            studio_request(body, _minimax_jobs.uploads(), "studio-validation-only")
+        except (ValueError, TypeError, KeyError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return _enqueue_deferred_generation_preparation(body)
     if _generation_request_uses_serial_auto_planner(body):
         return _enqueue_deferred_generation_preparation(body)
     return await _prepare_generation_submission(body)
@@ -23913,6 +23953,9 @@ def _run_generation(job_id: str, *, finalize: bool = True) -> bool:
     import inspect
 
     job = _jobs[job_id]
+    if job["params"].get("video_engine") == "minimax":
+        from services.minimax_studio import run_studio_job
+        return run_studio_job(job, _minimax_jobs, try_start, update_job, finish_job)
     start_time = time.time()
     abort_state = None
 
@@ -24258,6 +24301,7 @@ def _run_generation(job_id: str, *, finalize: bool = True) -> bool:
                 per_clip_continuations = raw_params.pop(
                     "per_clip_continue_from_previous", None,
                 )
+                per_clip_omni_continuity = raw_params.pop("per_clip_omni_continuity", None)
                 multi_clip_concat_audio = raw_params.pop(
                     "multi_clip_concat_audio", None,
                 )
@@ -24432,7 +24476,12 @@ def _run_generation(job_id: str, *, finalize: bool = True) -> bool:
                         "cumulative_offset": True,
                         "audio_start_sec": multi_clip_audio_start_sec,
                         "concat_audio_path": multi_clip_concat_audio,
-                        "omni_sequence_continuity": omni_sequence_continuity,
+                        "omni_sequence_continuity": (
+                            bool(i + 1 < len(per_clip_omni_continuity) and per_clip_omni_continuity[i + 1])
+                            if isinstance(per_clip_omni_continuity, list)
+                            else omni_sequence_continuity
+                        ),
+                        "omni_sequence_project_look": per_clip_omni_continuity is None,
                         "target_total_frames": omni_sequence_target_frames,
                     }
                     # Director supplies the prompt mode explicitly so normal
@@ -25426,7 +25475,7 @@ def _run_generation(job_id: str, *, finalize: bool = True) -> bool:
                                     select_reference_frame,
                                 )
 
-                                if task_idx == 0 and task_idx + 2 < total_tasks:
+                                if task_idx == 0 and task_idx + 2 < total_tasks and sequence_info.get("omni_sequence_project_look", True):
                                     first_future_refs = list(
                                         (queue[task_idx + 2].get("params") or {}).get(
                                             "minimax_h3_references"

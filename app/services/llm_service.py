@@ -648,6 +648,9 @@ def get_available_models(provider: str = "local", remote_url: str = "", api_key:
             {"id": "claude-haiku-4-5-20251001", "label": "Claude Haiku 4.5", "size_hint": "anthropic", "provider": "anthropic"},
         ])
 
+    if provider in ("minimax", "minimax_subscription"):
+        remote_models.extend({"id": mid, "label": mid, "size_hint": "MiniMax API", "provider": provider}
+                             for mid in ("MiniMax-M3", "MiniMax-M2.7"))
     return local_models + remote_models
 
 
@@ -668,6 +671,8 @@ PROVIDER_API_KEY_SETTING = {
     "remote": "llm_remote_api_key",
     "openai": "openai_api_key",
     "anthropic": "anthropic_api_key",
+    "minimax": "minimax_api_key",
+    "minimax_subscription": "minimax_subscription_api_key",
 }
 
 
@@ -714,7 +719,7 @@ def _finalize_payload(payload: dict) -> dict:
     llama.cpp-only fields such as ``cache_prompt`` and ``min_p``.
     """
 
-    if _provider not in ("remote", "openai"):
+    if _provider not in ("remote", "openai", "minimax", "minimax_subscription"):
         return payload
     prepared = {
         key: value
@@ -728,10 +733,19 @@ def _finalize_payload(payload: dict) -> dict:
             f"accepted by provider={_provider}: {', '.join(dropped)}"
         )
     prepared["model"] = _model_id
+    if _provider in ("minimax", "minimax_subscription"):
+        prepared = {key: value for key, value in prepared.items() if key in {
+            "model", "messages", "max_tokens", "temperature", "top_p", "stream",
+        }}
+        prepared["reasoning_split"] = True
+        if _model_id == "MiniMax-M3" and payload.get("enable_thinking") is False:
+            prepared["thinking"] = {"type": "disabled"}
     return prepared
 
 
 def _server_url() -> str:
+    if _provider in ("minimax", "minimax_subscription"):
+        return "https://api.minimax.io"
     if _provider in ("remote", "openai") and _remote_url:
         return _remote_url.rstrip("/")
     return f"http://127.0.0.1:{_server_port}"
@@ -740,7 +754,7 @@ def _server_url() -> str:
 def _api_headers() -> dict:
     """Build headers for API calls (adds auth for remote providers)."""
     headers = {"Content-Type": "application/json"}
-    if _provider in ("remote", "openai", "anthropic") and _api_key:
+    if _provider in ("remote", "openai", "anthropic", "minimax", "minimax_subscription") and _api_key:
         if _provider == "anthropic":
             headers["x-api-key"] = _api_key
             headers["anthropic-version"] = "2023-06-01"
@@ -1141,7 +1155,7 @@ def _log_generation_metrics(metrics: dict) -> None:
 
 
 def is_loaded() -> bool:
-    if _provider in ("remote", "openai", "anthropic"):
+    if _provider in ("remote", "openai", "anthropic", "minimax", "minimax_subscription"):
         return bool(_model_id)
     return _process is not None and _process.poll() is None
 
@@ -1658,8 +1672,14 @@ def load_model(
     global _process, _model_id, _device, _server_port, _vision_available
     global _provider, _remote_url, _api_key
 
+    if provider in ("minimax", "minimax_subscription"):
+        if not api_key:
+            raise ValueError("Add the selected MiniMax API key in Settings → Services.")
+        if not model_id.startswith("MiniMax-M"):
+            raise ValueError("Select a MiniMax M-series language model, such as MiniMax-M3.")
+        remote_url = "https://api.minimax.io"
     # Handle remote/API providers — no subprocess needed
-    if provider in ("remote", "openai", "anthropic"):
+    if provider in ("remote", "openai", "anthropic", "minimax", "minimax_subscription"):
         with _lock:
             if (
                 is_loaded()
@@ -1677,7 +1697,7 @@ def load_model(
             _api_key = api_key
             _model_id = model_id
             _device = provider
-            _vision_available = False
+            _vision_available = provider in ("minimax", "minimax_subscription") and model_id == "MiniMax-M3"
             print(f"[LLM] Connected to {provider} provider: model={model_id}, url={remote_url or 'API'}")
             _reset_idle_timer()
         return
@@ -4324,6 +4344,8 @@ def _canonicalize_h3_ref2va_reference_fields(
     reference_context: Optional[str],
     prompt: Optional[str] = None,
 ) -> str:
+    import re
+
     dialogue_source = str(prompt or "")
     if not _extract_h3_source_dialogue_entries(dialogue_source, reference_context):
         detail_match = re.search(

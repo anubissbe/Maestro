@@ -11,6 +11,32 @@ import numpy as np
 from PIL import Image
 
 
+def director_continuity_handoffs(plans: list[dict], timeline: list[dict]) -> list[bool]:
+    """Mark scene-local visual references; never carry a look across a scene cut.
+
+    A weak reference can preserve state across editorial camera cuts without
+    imposing a first frame. Literal FL2VA continuation has a stricter contract.
+    Missing planning metadata is deliberately not treated as one global scene.
+    """
+    rows = [dict(plan, **{key: value for key, value in (timeline[i] if i < len(timeline) else {}).items()
+                         if value is not None and value != ""})
+            for i, plan in enumerate(plans)]
+    handoffs = [False] * len(rows)
+    for i in range(1, len(rows)):
+        previous, current = rows[i - 1], rows[i]
+        first = str(previous.get("_director_continuity_group") or previous.get("continuity_group") or "").strip()
+        second = str(current.get("_director_continuity_group") or current.get("continuity_group") or "").strip()
+        if first and second:
+            handoffs[i] = first == second
+            continue
+        try:
+            source_overlap = set(previous.get("_director_source_clip_indices") or []) & set(current.get("_director_source_clip_indices") or [])
+            handoffs[i] = bool(source_overlap) and int(current.get("_director_segment_index", 0)) == int(previous.get("_director_segment_index", 0)) + 1
+        except (ValueError, TypeError):
+            pass
+    return handoffs
+
+
 def reference_capacity(references: list[dict[str, Any]], needed_images: int = 1) -> bool:
     images = sum(
         1 for item in references

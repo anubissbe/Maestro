@@ -6695,6 +6695,10 @@ export const useStore = create<AppState>((set, get) => ({
     }
 
     const params: Record<string, unknown> = { ...state.params, generation_mode: state.generationMode, workspace: state.activeWorkspace }
+    if (state.generationMode === 'video' && state.servicesConfig?.studio_video_engine === 'minimax') {
+      params.video_engine = 'minimax'
+      params._api_duration_seconds = state.durationSeconds
+    }
     if (state.generationMode === 'video') {
       params._studio_video_workflow = state.studioVideoWorkflow
     }
@@ -13123,7 +13127,8 @@ export const useStore = create<AppState>((set, get) => ({
         refImagePath = uploaded.path
         set({ directorReferenceImagePath: refImagePath })
       } catch (e) {
-        console.error('Failed to upload reference image for pipeline:', e)
+        set({ directorLoading: false, directorQueueLoading: false, directorError: `Reference photo upload failed: ${e instanceof Error ? e.message : String(e)}. Please retry.` })
+        return
       }
     }
     // Upload character refs that haven't been uploaded yet
@@ -13132,7 +13137,10 @@ export const useStore = create<AppState>((set, get) => ({
       try {
         const uploaded = await api.uploadImage(state.directorCharacterRefs[i])
         charPaths.push(uploaded.path)
-      } catch { /* skip failed uploads */ }
+      } catch {
+        set({ directorLoading: false, directorQueueLoading: false, directorError: 'Reference photo upload failed. Please retry before generating.' })
+        return
+      }
     }
     if (charPaths.length > state.directorCharacterRefPaths.length) {
       set({ directorCharacterRefPaths: charPaths })
@@ -13143,7 +13151,10 @@ export const useStore = create<AppState>((set, get) => ({
       try {
         const uploaded = await api.uploadImage(state.directorLocationRefs[i])
         locPaths.push(uploaded.path)
-      } catch { /* skip failed uploads */ }
+      } catch {
+        set({ directorLoading: false, directorQueueLoading: false, directorError: 'Reference photo upload failed. Please retry before generating.' })
+        return
+      }
     }
     if (locPaths.length > state.directorLocationRefPaths.length) {
       set({ directorLocationRefPaths: locPaths })
@@ -13205,6 +13216,7 @@ export const useStore = create<AppState>((set, get) => ({
     else if (shortFilmPath === 'audio') pipelineType = 'short_film_audio'
 
     const pipelineParams: Record<string, unknown> = {
+      video_engine: state.servicesConfig?.director_video_engine || 'local',
       pipeline_type: pipelineType,
       // Held work and reviewed revisions cannot pause for browser review.
       auto_mode: mode === 'queue' || state.directorClipPlans.length > 0
@@ -13235,7 +13247,7 @@ export const useStore = create<AppState>((set, get) => ({
       prepared_planned_clips: state.directorClipPlans.length > 0
         ? directorPlannedClips : undefined,
       prepared_clip_image_paths: preparedClipImagePaths,
-      seamless: directorSeamless,
+      seamless: state.servicesConfig?.director_video_engine === 'minimax' ? false : directorSeamless,
       shot_image_guidance: directorShotImageGuidance,
       director_resolution_preset: directorResolution,
       director_aspect_ratio: directorAspectRatio,
@@ -13295,7 +13307,7 @@ export const useStore = create<AppState>((set, get) => ({
         skip_steps_start_step_perc: directorCacheWarmup,
         ...(directorFixedMediaStrength ? { input_video_strength: 1.0 } : {}),
       },
-      video_loras: directorVideoOptions?.loras_disabled
+      video_loras: state.servicesConfig?.director_video_engine === 'minimax' || directorVideoOptions?.loras_disabled
         ? {
             activated_loras: [],
             loras_multipliers: '',

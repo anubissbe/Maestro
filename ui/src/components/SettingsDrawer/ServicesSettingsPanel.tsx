@@ -56,7 +56,7 @@ function ApiKeyField({ label, maskedValue, isSet, onSave }: {
   )
 }
 
-const PUBLIC_PROVIDERS = new Set(['openai', 'anthropic'])
+const PUBLIC_PROVIDERS = new Set(['openai', 'anthropic', 'minimax', 'minimax_subscription'])
 
 function NsfwDisclaimerModal({
   onAccept,
@@ -265,6 +265,13 @@ export function ServicesSettingsPanel() {
   const llmModels = useStore(s => s.llmModels)
   const loadLlmModels = useStore(s => s.loadLlmModels)
   const [refreshing, setRefreshing] = useState(false)
+  const [modelDraft, setModelDraft] = useState('')
+  useEffect(() => {
+    setModelDraft(servicesConfig?.llm_model_id || '')
+  }, [servicesConfig?.llm_model_id])
+  useEffect(() => {
+    if (servicesConfig?.llm_provider) void loadLlmModels()
+  }, [servicesConfig?.llm_provider, loadLlmModels])
 
   if (servicesConfigLoading && !servicesConfig) {
     return <div className="text-xs text-text-muted py-4 text-center">Loading...</div>
@@ -288,6 +295,7 @@ export function ServicesSettingsPanel() {
   const filteredModels = llmModels.filter(m => {
     const mp = (m as { provider?: string }).provider || 'local'
     if (isLocal) return mp === 'local'
+    if (provider.startsWith('minimax')) return mp === provider
     return mp === 'local' || mp === provider
   })
 
@@ -325,13 +333,15 @@ export function ServicesSettingsPanel() {
             onChange={e => {
               const newProvider = e.target.value
               const updates: Record<string, unknown> = { llm_provider: newProvider }
+              if (newProvider === 'minimax' || newProvider === 'minimax_subscription') {
+                updates.llm_model_id = 'MiniMax-M3'
+                updates.enhance_llm_model_id = ''
+              }
               // Auto-disable NSFW when switching to a public provider
               if (PUBLIC_PROVIDERS.has(newProvider) && servicesConfig.nsfw_mode) {
                 updates.nsfw_mode = false
               }
               updateConfig(updates)
-              // Refresh model list for new provider
-              setTimeout(() => loadLlmModels(), 500)
             }}
             className="w-full bg-bg-tertiary border border-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent-blue"
           >
@@ -339,6 +349,8 @@ export function ServicesSettingsPanel() {
             <option value="remote">Remote OpenAI-Compatible (LM Studio, etc.)</option>
             <option value="openai">OpenAI API</option>
             <option value="anthropic">Anthropic API</option>
+            <option value="minimax_subscription">MiniMax M3 — Subscription / Token Plan</option>
+            <option value="minimax">MiniMax M3 — Pay-as-you-go</option>
           </select>
         </div>
 
@@ -398,7 +410,27 @@ export function ServicesSettingsPanel() {
               </button>
             )}
           </div>
-          <select
+          {provider.startsWith('minimax') ? <>
+            <div className="flex gap-2">
+              <input
+                aria-label="LLM Model"
+                list="minimax-llm-models"
+                value={modelDraft}
+                onChange={e => setModelDraft(e.target.value)}
+                placeholder="MiniMax-M3"
+                className="w-full bg-bg-tertiary border border-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent-blue"
+              />
+              <button
+                disabled={!modelDraft.trim().startsWith('MiniMax-M') || modelDraft.trim() === servicesConfig.llm_model_id}
+                onClick={() => void updateConfig({ llm_model_id: modelDraft.trim() })}
+                className="text-xs text-accent-blue disabled:opacity-40"
+              >Save</button>
+            </div>
+            <datalist id="minimax-llm-models">
+              {filteredModels.map(m => <option key={m.id} value={m.id} />)}
+            </datalist>
+            <p className="text-[10px] text-text-muted mt-1">Enter the exact MiniMax language model ID, such as MiniMax-M3. Saved changes apply to the next LLM request.</p>
+          </> : <select
             value={servicesConfig.llm_model_id}
             onChange={e => updateConfig({ llm_model_id: e.target.value })}
             className="w-full bg-bg-tertiary border border-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent-blue"
@@ -408,7 +440,7 @@ export function ServicesSettingsPanel() {
                 {m.label} ({m.size_hint})
               </option>
             ))}
-          </select>
+          </select>}
           {isLocal && (
             <p className="text-[10px] text-text-muted mt-1">
               Larger models produce more creative scene descriptions but use more RAM
@@ -692,6 +724,24 @@ export function ServicesSettingsPanel() {
             />
           </>
         )}
+
+        <ApiKeyField
+          label="MiniMax Pay-as-you-go API Key"
+          maskedValue={servicesConfig.minimax_api_key || ''}
+          isSet={servicesConfig.minimax_api_key_set || false}
+          onSave={value => updateConfig({ minimax_api_key: value })}
+        />
+        <ApiKeyField
+          label="MiniMax Subscription / Token Plan Key"
+          maskedValue={servicesConfig.minimax_subscription_api_key || ''}
+          isSet={servicesConfig.minimax_subscription_api_key_set || false}
+          onSave={value => updateConfig({ minimax_subscription_api_key: value })}
+        />
+        <p className="text-[11px] text-text-muted">
+          H3 video uses pay-as-you-go. For M3 prompt enhancement, select the subscription or pay-as-you-go
+          LLM provider above. Maestro never falls back to the other key. Token Plan coverage depends on your
+          plan; eligible overflow may use purchased Credits on MiniMax.
+        </p>
 
         <ApiKeyField
           label="CivitAI API Key"

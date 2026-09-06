@@ -325,6 +325,13 @@ def _create_director_video_execution_profile(
 ) -> dict:
     """Build a trusted profile and normalize the submitted video canvas."""
 
+    if params.get("video_engine") == "minimax":
+        profile = {"is_minimax_h3": True, "effective_max_frames": 360,
+                   "effective_max_seconds": 15, "fps": 24,
+                   "normalized_resolution": "1280x768", "backend": "minimax_api"}
+        params["_director_video_execution_profile"] = profile
+        return profile
+
     video_model = params.get("video_model") or "ltx2_22B_distilled_1_1"
     if model_def is None:
         getter = getattr(_wgp, "get_model_def", None)
@@ -650,6 +657,39 @@ def _director_visual_reference_paths(params: dict) -> list[str]:
     return paths
 
 
+def _director_planner_image_inputs(params: dict) -> dict:
+    """Expose Omni photos to planners that consume the legacy image inputs."""
+    result = {
+        "reference_image_path": params.get("reference_image_path"),
+        "character_ref_paths": list(params.get("character_ref_paths") or []),
+        "character_ref_labels": list(params.get("character_ref_labels") or []),
+        "location_ref_paths": list(params.get("location_ref_paths") or []),
+        "location_ref_labels": list(params.get("location_ref_labels") or []),
+    }
+    seen = set(_director_visual_reference_paths({k: v for k, v in result.items()}))
+    for reference in params.get("minimax_h3_references") or []:
+        if reference.get("type") != "image":
+            continue
+        path = reference.get("path")
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        if not os.path.isfile(path):
+            raise ValueError("Director reference photo is missing; upload it again before planning.")
+        location = reference.get("image_intent") in {"scene", "composition"}
+        prefix = "location" if location else "character"
+        paths = result[prefix + "_ref_paths"]
+        labels = result[prefix + "_ref_labels"]
+        while len(labels) < len(paths):
+            labels.append("")
+        paths.append(path)
+        labels.append(str(reference.get("character_name") or reference.get("role") or ""))
+    if not result["reference_image_path"] and result["character_ref_paths"]:
+        result["reference_image_path"] = result["character_ref_paths"].pop(0)
+        result["character_ref_labels"].pop(0)
+    return result
+
+
 def _director_has_visual_references(
     params: dict,
     *,
@@ -740,6 +780,12 @@ def _validate_director_models(
     stages: tuple[str, ...] = ("image", "video"),
 ) -> None:
     """Reject model/workflow combinations Director cannot drive safely."""
+    if params.get("video_engine") == "minimax":
+        from services.minimax_api import payg_key
+        payg_key(_wgp.server_config.get("services", {}))
+        if (params.get("video_loras") or {}).get("activated_loras"):
+            raise ValueError("MiniMax API cannot use video LoRAs. Disable them or choose Local generation.")
+        return
     registry_methods = (
         "get_model_def",
         "get_model_family",
@@ -2547,6 +2593,22 @@ def _rerun_clip_video_impl(out_dir: str, pid: str, clip_index: int, prompt_overr
         raise ValueError("No video prompt for this clip")
 
     snapshot = state.get("_params_snapshot") or {}
+    if snapshot.get("video_engine") == "minimax":
+        from services.director_minimax import render_clips
+        pipeline_file = _find_pipeline_file(out_dir, pid)
+        clip_out_dir = os.path.dirname(pipeline_file) if pipeline_file else out_dir
+        render_id = f"{pid}-rerun-{clip_index}-{uuid.uuid4().hex[:8]}"
+        render_params = dict(snapshot)
+        result = render_clips(render_id, render_params, [{"video_prompt": prompt}],
+                [clip.get("planned_clip") or {}], [clip.get("start_image_filename") or ""],
+                clip_out_dir, _wgp, lambda *a, **k: None, lambda *a: None,
+                lambda: False, _DirectorOutputs, join=False)
+        new_filename = result[0]
+        def update_cloud_clip(saved):
+            saved["clips"][clip_index].update(video_filename=new_filename, video_stale=False, video_prompt=prompt)
+            saved.setdefault("output_files", []).append(new_filename)
+        _update_saved_pipeline(out_dir, pid, update_cloud_clip)
+        return {"filename": new_filename, "clip_index": clip_index}
     video_model = state.get("video_model") or "ltx2_22B_distilled_1_1"
     prompt_plan = {
         "video_prompt": prompt,
@@ -3011,6 +3073,27 @@ def _rerun_clip_video_impl(out_dir: str, pid: str, clip_index: int, prompt_overr
             )
 
     try:
+        if director_strategy == OMNI_REFERENCE and clip_index > 0:
+            from services.h3_sequence_continuity import (
+                director_continuity_handoffs, reference_capacity,
+                select_reference_frame, append_generated_reference,
+                augment_prompt_with_continuity,
+            )
+            handoffs = director_continuity_handoffs(
+                clips, [item.get("planned_clip") or {} for item in clips]
+            )
+            references = gen_params.get("minimax_h3_references") or []
+            if handoffs[clip_index] and reference_capacity(references, 1):
+                previous_video = clips[clip_index - 1].get("video_filename")
+                if _invalid_saved_media_numbers([previous_video], 1, clip_out_dir, "video"):
+                    raise ValueError("Regenerate the preceding scene clip first to restore its visual continuity reference.")
+                continuation_path = os.path.join(clip_out_dir, f"_director_omni_handoff_{uuid.uuid4().hex}.png")
+                select_reference_frame(os.path.join(clip_out_dir, previous_video), kind="continuity", fps=fps).save(continuation_path)
+                references, number = append_generated_reference(references, continuation_path,
+                    role="Previous scene clip: blocking, environment state, lighting and screen direction only")
+                if number is not None:
+                    gen_params["minimax_h3_references"] = references
+                    gen_params["prompt"] = augment_prompt_with_continuity(gen_params["prompt"], picture_number=number, kind="continuity")
         output_files = _submit_and_wait(
             gen_params, timeout_s=3600, out_dir=clip_out_dir,
         )
@@ -4697,6 +4780,9 @@ def _start_pipeline_worker(pid: str, *, resume: bool = False) -> None:
 
 def start_pipeline(params: dict) -> str:
     """Start a new director pipeline. Returns pipeline_id."""
+    if params.get("video_engine") == "minimax":
+        params["video_model"] = "minimax_h3_ref2va"
+        params["seamless"] = False
     # Internal resume metadata must never be accepted from a fresh API request.
     # Otherwise a caller could nominate unrelated workspace media as this
     # pipeline's generated anchor and later influence repair/cleanup behavior.
@@ -5995,7 +6081,13 @@ def _run_planning_v2(pid: str, params: dict, pipeline_type: str):
 
     # Build planner kwargs
     scene_description = params.get("scene_description", "")
-    reference_image_path = params.get("reference_image_path")
+    planner_images = _director_planner_image_inputs(params)
+    reference_image_path = planner_images["reference_image_path"]
+    if any(planner_images.get(key) for key in ("reference_image_path", "character_ref_paths")):
+        scene_description += ("\nIDENTITY REFERENCES: The supplied photos define the cast. "
+            "Preserve their visible age, face, hair and appearance; do not invent a different person. "
+            "Repeated photos with the same character label show the same person. "
+            "If a visual detail cannot be established, refer to the pictured person instead of guessing.")
     planned_clips = params.get("planned_clips", [])
 
     # Read NSFW from server config (persisted setting, not per-request)
@@ -6166,11 +6258,8 @@ def _run_planning_v2(pid: str, params: dict, pipeline_type: str):
             planner_kwargs["polish_block"] = polish_block
             print(f"[Pipeline {pid}] Injected {guide_mode} polish block ({len(polish_block)} chars)")
 
-    # Also pass character/location ref labels and paths for image prompt rules
-    planner_kwargs["character_ref_paths"] = params.get("character_ref_paths", [])
-    planner_kwargs["character_ref_labels"] = params.get("character_ref_labels", [])
-    planner_kwargs["location_ref_paths"] = params.get("location_ref_paths", [])
-    planner_kwargs["location_ref_labels"] = params.get("location_ref_labels", [])
+    # The renderer and planner must see the same selected reference photos.
+    planner_kwargs.update(planner_images)
 
     # Plan
     print(f"[Pipeline {pid}] Planning with DirectorOrchestrator (skill={skill_type})...")
@@ -6861,6 +6950,12 @@ def _run_video_generation(pid: str, params: dict, clip_plans: list[dict],
                           clip_keyframes: Optional[list[list[str]]] = None,
                           out_dir: str = None, workspace: str = None) -> list[str]:
     """Generate multi-clip video with optional keyframe injection. Returns list of output filenames."""
+    if params.get("video_engine") == "minimax":
+        from services.director_minimax import render_clips
+        return render_clips(pid, params, clip_plans, planned_clips, clip_images,
+                            out_dir, _wgp, _update_pipeline, _save_pipeline_state,
+                            lambda: _pipelines.get(pid, {}).get("status") == "cancelled",
+                            _DirectorOutputs)
     _validate_director_models(params, stages=("video",))
     video_model = params.get("video_model") or "ltx2_22B_distilled_1_1"
     _preflight_h3_director_prompts(video_model, clip_plans, pid=pid)
@@ -7723,6 +7818,12 @@ def _run_video_generation(pid: str, params: dict, clip_plans: list[dict],
         gen_params["film_grain_saturation"] = film_grain_saturation
 
     # Track progress by monitoring the generation job
+    if director_strategy == OMNI_REFERENCE:
+        from services.h3_sequence_continuity import director_continuity_handoffs
+        handoffs = director_continuity_handoffs(clip_plans, planned_clips)
+        gen_params["per_clip_omni_continuity"] = handoffs
+        gen_params["_omni_sequence_continuity"] = any(handoffs)
+        print(f"[Director continuity] Scene-local Omni visual handoffs: {handoffs}")
     output_files = _submit_and_wait(
         gen_params,
         timeout_s=7200,

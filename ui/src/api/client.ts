@@ -2715,3 +2715,27 @@ export async function fetchActiveDownloads(): Promise<{ downloads: ActiveDownloa
   if (!res.ok) throw new Error(`Failed to fetch active downloads (${res.status})`)
   return res.json()
 }
+
+
+export interface MiniMaxJob {
+  id: string
+  task_id: string | null
+  status: string
+  model: string
+  prompt: string
+  output: string | null
+  error: string | null
+}
+
+async function minimaxRequest<T>(path: string, body?: unknown): Promise<T> {
+  const response = await fetch(`${BASE}/api/v1/minimax${path}`, body === undefined ? {} : {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  })
+  const data = await response.json()
+  if (!response.ok) throw Object.assign(new Error(data.detail || 'MiniMax request failed'), { status: response.status })
+  return data
+}
+
+export const fetchMiniMaxJobs = () => minimaxRequest<{ jobs: MiniMaxJob[] }>('/jobs')
+export const submitMiniMaxVideo = (body: { client_id: string; model: string; prompt: string; duration: number; resolution: string; ratio: string; references: { role: string; path: string }[] }) => minimaxRequest<MiniMaxJob>('/video', body)
+export const resumeMiniMaxJob = (id: string) => minimaxRequest<MiniMaxJob>(`/jobs/${encodeURIComponent(id)}/resume`, {})
