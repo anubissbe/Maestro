@@ -28,7 +28,9 @@ These features are currently under [Unreleased](../CHANGELOG.md#unreleased).
 
 Changing the model, prompt, reference images, or active LoRAs invalidates the
 displayed suggestions. Reference images require a vision-capable configured LLM;
-the interactive request accepts at most eight images and 16,000 prompt characters.
+they must be valid image files under Maestro's uploads or configured outputs root.
+Paths and symlinks escaping those directories are rejected before LLM submission.
+The interactive request accepts at most eight images and 16,000 prompt characters.
 Interactive requests may be deferred with an error while generation is using the GPU.
 
 Suggestions use actual files from the model's existing Maestro LoRA catalog,

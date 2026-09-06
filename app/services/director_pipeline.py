@@ -5982,6 +5982,7 @@ def _select_automatic_loras(pid: str, params: dict):
         return
     from services import llm_service
     from services.director_auto_loras import select_addition
+    from services.lora_suggestions import validate_reference_images
 
     if _list_lora_details is None:
         raise RuntimeError("Director's LoRA catalog is unavailable")
@@ -5990,8 +5991,8 @@ def _select_automatic_loras(pid: str, params: dict):
         *image_inputs.get("character_ref_paths", []), *image_inputs.get("location_ref_paths", [])] if p))
     if paths and not llm_service._vision_available:
         raise RuntimeError("Automatic LoRA selection from images requires a vision-capable LLM")
-    if any(not os.path.isfile(path) for path in paths):
-        raise RuntimeError("A Director reference image is missing; upload it again before planning")
+    paths = validate_reference_images(paths, [os.path.join(os.getcwd(), "uploads"),
+        _wgp.server_config.get("save_path", "outputs")])
     nsfw = bool((_wgp.server_config.get("services") or {}).get("nsfw_mode"))
     choices = params.setdefault("_auto_lora_selections", {})
     for mode in ("image", "video"):

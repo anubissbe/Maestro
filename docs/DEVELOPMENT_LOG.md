@@ -19,6 +19,8 @@ The release version remains **2.0.1**.
   invalidation, existing-selection checks, and metadata duplicate-version detection.
 - Changed LLM uncertainty and interaction claims from blocking conflicts to manual
   advice. Automatic Director selection continues to skip advisory warnings.
+- Restricted suggestion reference images to Maestro uploads and configured outputs;
+  tests reject outside paths, traversal, escaping symlinks, and non-image files.
 - Added automatic selection before new Director pipeline planning, bounded to one
   extra LoRA per model. Selection reports and weights are persisted; keywords go
   to the relevant image/video prompts. Existing reviewed/resumed plans are retained.

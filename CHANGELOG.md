@@ -23,6 +23,9 @@ pipeline's own history lives in [app/docs/CHANGELOG.md](app/docs/CHANGELOG.md).
 
 ### Fixed
 
+- LoRA suggestion reference paths are restricted to valid images in Maestro's
+  uploads or configured outputs root, including checks for symlinks escaping those
+  directories, before being sent to a vision LLM.
 - LLM interaction warnings and insufficient metadata no longer appear as blocking
   "Possible conflict" errors in manual LoRA suggestions. They are advisory; the
   same-file exclusion and shared-LoRA-ID duplicate-version check remain. Automatic

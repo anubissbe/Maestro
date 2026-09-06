@@ -7853,7 +7853,7 @@ def _guard_interactive_llm_against_generation() -> None:
 @api.post("/api/v1/llm/suggest-loras")
 def llm_suggest_loras(body: dict):
     from services import llm_service
-    from services.lora_suggestions import suggest_loras
+    from services.lora_suggestions import suggest_loras, validate_reference_images
 
     model_type = body.get("model_type")
     prompt = body.get("prompt", "")
@@ -7864,8 +7864,11 @@ def llm_suggest_loras(body: dict):
         raise HTTPException(status_code=400, detail="Invalid prompt (maximum 16000 characters)")
     if not isinstance(paths, list) or len(paths) > 8 or any(not isinstance(p, str) for p in paths):
         raise HTTPException(status_code=400, detail="Provide at most eight image paths")
-    if any(not os.path.isfile(p) for p in paths):
-        raise HTTPException(status_code=400, detail="A reference image is no longer available")
+    try:
+        paths = validate_reference_images(paths, [os.path.join(os.getcwd(), "uploads"),
+            wgp.server_config.get("save_path", "outputs")])
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not prompt.strip() and not paths:
         raise HTTPException(status_code=400, detail="Add a prompt or reference image first")
     services = wgp.server_config.get("services", {})

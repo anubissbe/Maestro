@@ -5,12 +5,48 @@ import os
 from pathlib import Path
 import sys
 import unittest
+import tempfile
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
-from services.lora_suggestions import suggest_loras
+from services.lora_suggestions import suggest_loras, validate_reference_images
+
+
+class ReferenceBoundaryTests(unittest.TestCase):
+    def test_allowed_image_is_canonicalized_and_outside_files_are_rejected(self):
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            uploads = root / "uploads"
+            uploads.mkdir()
+            good = uploads / "image.png"
+            outside = root / "outside.png"
+            for path in (good, outside):
+                Image.new("RGB", (2, 2)).save(path)
+            invalid = uploads / "not-an-image.png"
+            invalid.write_text("fixture text")
+            self.assertEqual(validate_reference_images([str(good)], [uploads]), [str(good.resolve())])
+            for path in (outside, uploads / ".." / "outside.png", invalid, uploads / "missing.png"):
+                with self.subTest(path=path.name), self.assertRaises(ValueError):
+                    validate_reference_images([str(path)], [uploads])
+
+    def test_symlink_outside_media_root_is_rejected(self):
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            uploads = root / "uploads"
+            uploads.mkdir()
+            outside = root / "outside.png"
+            Image.new("RGB", (2, 2)).save(outside)
+            link = uploads / "linked.png"
+            try:
+                link.symlink_to(outside)
+            except OSError:
+                self.skipTest("Symlink creation unavailable")
+            with self.assertRaises(ValueError):
+                validate_reference_images([str(link)], [uploads])
 
 
 class SuggestionsTests(unittest.TestCase):

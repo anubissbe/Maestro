@@ -1,5 +1,25 @@
 """Rank a server-selected local LoRA catalog without trusting generated filenames."""
 import json
+from pathlib import Path
+
+
+def validate_reference_images(paths, allowed_roots):
+    """Allow only image assets inside server-owned media roots, after symlinks."""
+    from PIL import Image
+
+    roots = [Path(root).resolve() for root in allowed_roots]
+    validated = []
+    for path in paths:
+        try:
+            candidate = Path(path).resolve(strict=True)
+            if not any(root in candidate.parents for root in roots) or not candidate.is_file():
+                raise ValueError("out-of-scope asset")
+            with Image.open(candidate) as image:
+                image.verify()
+        except (OSError, ValueError, RuntimeError, SyntaxError, Image.DecompressionBombError) as exc:
+            raise ValueError("Reference images must be valid images in Maestro uploads or outputs") from exc
+        validated.append(str(candidate))
+    return validated
 
 
 def suggest_loras(candidates, prompt, model_type, image_paths, generate, active=(), automatic=False):
