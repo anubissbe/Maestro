@@ -23,6 +23,8 @@ pipeline's own history lives in [app/docs/CHANGELOG.md](app/docs/CHANGELOG.md).
 
 ### Fixed
 
+- MiniMax validation and job helpers no longer require FastAPI merely to import;
+  route registration loads it when needed, keeping the CPU test suite portable.
 - LoRA suggestion reference paths are restricted to valid images in Maestro's
   uploads or configured outputs root, including checks for symlinks escaping those
   directories, before being sent to a vision LLM.

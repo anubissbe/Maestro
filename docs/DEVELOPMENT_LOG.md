@@ -57,6 +57,9 @@ keyword behavior, and workflow limits.
   characters returned in approximately 5.3 seconds, including model loading.
 - A complete Director render using automatic LoRA selection has **not** been
   validated end to end. Do not interpret unit-test coverage as that live result.
+- PR validation exposed an eager FastAPI import in the existing MiniMax helpers.
+  FastAPI is now imported during HTTP route registration so the helper tests also
+  run in the lightweight CPU CI environment without skipping those tests.
 
 ### Following changes
 
